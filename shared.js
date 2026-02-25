@@ -5,22 +5,28 @@ const ID_KEY = 'carefirst_nextId';
 const ADMIN_KEY = 'carefirst_admin';
 const ADMIN_PASSWORD = 'CareFirst@2026';
 
-// Severity weights
-const SEVERITY_SCORE = { critical: 100, severe: 70, moderate: 40, mild: 10 };
+// Severity weights — Critical always first, then elderly get boosted
+const SEVERITY_SCORE = { critical: 300, severe: 150, moderate: 80, mild: 30 };
 
 function calculatePriority(age, severity) {
   let score = SEVERITY_SCORE[severity] || 0;
+  // Elder bonus (applies within same severity tier)
   if (age >= 65) {
-    score += 50;
-    if (age >= 80) score += 20;
+    score += 40;
+    if (age >= 80) score += 15; // total +55 for 80+
   }
-  if (age <= 5) score += 30;
+  // Young children bonus
+  if (age <= 5) score += 20;
   return score;
 }
 
 // Load queue from localStorage
 let queue = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
 let nextId = parseInt(localStorage.getItem(ID_KEY) || '1', 10);
+
+// Recalculate all priorities (in case scoring changed)
+queue.forEach(p => { p.priority = calculatePriority(p.age, p.severity); });
+saveQueue();
 
 // Admin state
 let isAdmin = localStorage.getItem(ADMIN_KEY) === 'true';
@@ -54,8 +60,8 @@ function saveQueue() {
 }
 
 function getPriorityClass(score) {
-  if (score >= 100) return 'priority-high';
-  if (score >= 60)  return 'priority-medium';
+  if (score >= 250) return 'priority-high';
+  if (score >= 120) return 'priority-medium';
   return 'priority-low';
 }
 
