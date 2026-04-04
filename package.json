@@ -1,0 +1,12 @@
+{
+  "name": "carefirst-health",
+  "version": "1.0.0",
+  "description": "CareFirst Priority Healthcare Queue System",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}

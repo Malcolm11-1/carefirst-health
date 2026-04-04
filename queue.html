@@ -120,10 +120,12 @@
     if (!sessionStorage.getItem("cf_portal_selection")) {
       window.location.replace("home.html#patient-portal");
     }
-  </script>
-  <script>
-    renderQueue();
-    updateAdminUI();
+
+    // Load queue from server then render
+    loadQueue().then(() => {
+      renderQueue();
+      updateAdminUI();
+    });
   </script>
 </body>
 </html>

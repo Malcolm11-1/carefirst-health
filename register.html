@@ -97,7 +97,7 @@
     }
   </script>
   <script>
-    document.getElementById('patientForm').addEventListener('submit', function(e) {
+    document.getElementById('patientForm').addEventListener('submit', async function(e) {
       e.preventDefault();
 
       const name = document.getElementById('name').value.trim();
@@ -106,7 +106,14 @@
       const condition = document.getElementById('condition').value;
       const symptoms = document.getElementById('symptoms').value.trim();
 
-      addPatient(name, age, gender, condition, symptoms);
+      const submitBtn = this.querySelector('[type="submit"]');
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Adding...';
+
+      await addPatient(name, age, gender, condition, symptoms);
+
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Add to Priority Queue';
 
       const msg = document.getElementById('formMessage');
       const priorityLabel = age >= 65 ? 'Elder priority applied!' : (condition === 'critical' ? 'Critical priority applied!' : 'Added to queue.');

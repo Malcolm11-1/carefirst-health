@@ -1,62 +1,57 @@
-// ===== Shared Priority Queue System (localStorage-backed) =====
+// ===== Shared Priority Queue System (Node.js API-backed) =====
 
-const STORAGE_KEY = 'carefirst_queue';
-const ID_KEY = 'carefirst_nextId';
 const ADMIN_KEY = 'carefirst_admin';
 const ADMIN_PASSWORD = 'CareFirst@2026';
 
-// Severity weights — Critical always first, then elderly get boosted
 const SEVERITY_SCORE = { critical: 300, severe: 150, moderate: 80, mild: 30 };
 
 function calculatePriority(age, severity) {
   let score = SEVERITY_SCORE[severity] || 0;
-  // Elder bonus (applies within same severity tier)
   if (age >= 65) {
     score += 40;
-    if (age >= 80) score += 15; // total +55 for 80+
+    if (age >= 80) score += 15;
   }
-  // Young children bonus
   if (age <= 5) score += 20;
   return score;
 }
 
-// Load queue from localStorage
-let queue = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-let nextId = parseInt(localStorage.getItem(ID_KEY) || '1', 10);
+// In-memory queue populated from API
+let queue = [];
 
-// Recalculate all priorities (in case scoring changed)
-queue.forEach(p => { p.priority = calculatePriority(p.age, p.severity); });
-saveQueue();
-
-// Admin state
+// Admin state (stored in localStorage as UI preference)
 let isAdmin = localStorage.getItem(ADMIN_KEY) === 'true';
 
-// Seed demo data on first visit
-if (queue.length === 0 && !localStorage.getItem('carefirst_seeded')) {
-  const demo = [
-    { name: 'Margaret Williams', age: 78, gender: 'Female', severity: 'severe', symptoms: 'Chest pain, shortness of breath' },
-    { name: 'James Carter', age: 34, gender: 'Male', severity: 'mild', symptoms: 'Minor headache, sore throat' },
-    { name: 'Robert Chen', age: 82, gender: 'Male', severity: 'critical', symptoms: 'Stroke symptoms, slurred speech' },
-    { name: 'Sarah Ahmed', age: 45, gender: 'Female', severity: 'moderate', symptoms: 'High fever, body aches' },
-    { name: 'Dorothy Evans', age: 91, gender: 'Female', severity: 'moderate', symptoms: 'Dizziness, joint pain' },
-    { name: 'Michael Torres', age: 28, gender: 'Male', severity: 'mild', symptoms: 'Sprained ankle' },
-  ];
-  demo.forEach(d => {
-    queue.push({
-      id: nextId++,
-      ...d,
-      priority: calculatePriority(d.age, d.severity),
-      status: 'waiting',
-      arrivedAt: new Date().toISOString()
-    });
-  });
-  saveQueue();
-  localStorage.setItem('carefirst_seeded', 'true');
+// ===== API Helpers =====
+async function apiGet(path) {
+  const res = await fetch(path);
+  return res.json();
 }
 
-function saveQueue() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(queue));
-  localStorage.setItem(ID_KEY, String(nextId));
+async function apiPost(path, body) {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  return res.json();
+}
+
+async function apiPatch(path) {
+  const res = await fetch(path, { method: 'PATCH' });
+  return res.json();
+}
+
+async function apiDelete(path) {
+  const res = await fetch(path, { method: 'DELETE' });
+  return res.json();
+}
+
+// Load queue from API
+async function loadQueue() {
+  const data = await apiGet('/api/queue');
+  queue = data.patients || [];
+  // Recalculate priorities client-side in case scoring changed
+  queue.forEach(p => { p.priority = calculatePriority(p.age, p.severity); });
 }
 
 function getPriorityClass(score) {
@@ -98,7 +93,6 @@ function animateCounter(el, target) {
   }, speed);
 }
 
-// Update just the stats
 function updateStats() {
   const totalEl = document.getElementById('totalCount');
   const criticalEl = document.getElementById('criticalCount');
@@ -157,36 +151,36 @@ function updateAdminUI() {
   if (adminBadge) adminBadge.style.display = isAdmin ? '' : 'none';
 }
 
-// Delete single patient
-window.deletePatient = function(id) {
+// Delete single patient (admin only)
+window.deletePatient = async function(id) {
   if (!isAdmin) return;
   const p = queue.find(x => x.id === id);
   if (p && confirm(`Delete record for "${p.name}"? This cannot be undone.`)) {
-    queue = queue.filter(x => x.id !== id);
-    saveQueue();
+    await apiDelete(`/api/patients/${id}`);
+    await loadQueue();
     renderQueue();
   }
 };
 
-// Delete all completed patients
-window.clearCompleted = function() {
+// Delete all completed patients (admin only)
+window.clearCompleted = async function() {
   if (!isAdmin) return;
   const completed = queue.filter(p => p.status === 'done');
   if (completed.length === 0) { alert('No completed records to clear.'); return; }
   if (confirm(`Delete all ${completed.length} completed record(s)? This cannot be undone.`)) {
-    queue = queue.filter(p => p.status !== 'done');
-    saveQueue();
+    await apiDelete('/api/patients/completed');
+    await loadQueue();
     renderQueue();
   }
 };
 
-// Delete ALL patients
-window.clearAllPatients = function() {
+// Delete ALL patients (admin only)
+window.clearAllPatients = async function() {
   if (!isAdmin) return;
   if (queue.length === 0) { alert('Queue is already empty.'); return; }
   if (confirm(`Delete ALL ${queue.length} patient record(s)? This cannot be undone.`)) {
-    queue = [];
-    saveQueue();
+    await apiDelete('/api/patients');
+    await loadQueue();
     renderQueue();
   }
 };
@@ -221,13 +215,14 @@ function renderQueue() {
 
     const elderTag = p.age >= 65 ? ' <span class="elder-tag">Elder</span>' : '';
 
-    let actions = '';
-    if (p.status === 'waiting') {
-      actions = `<button class="btn btn-sm btn-success" onclick="servePatient(${p.id})">Serve</button>`;
-    } else if (p.status === 'serving') {
-      actions = `<button class="btn btn-sm btn-danger" onclick="completePatient(${p.id})">Done</button>`;
-    } else {
-      actions = '<span style="color:#b2bec3;">—</span>';
+    // Action column — visible to admin only
+    let actions = '<span style="color:#b2bec3;">—</span>';
+    if (isAdmin) {
+      if (p.status === 'waiting') {
+        actions = `<button class="btn btn-sm btn-success" onclick="servePatient(${p.id})">Serve</button>`;
+      } else if (p.status === 'serving') {
+        actions = `<button class="btn btn-sm btn-danger" onclick="completePatient(${p.id})">Done</button>`;
+      }
     }
 
     const deleteCol = isAdmin
@@ -292,44 +287,47 @@ function renderMiniQueue() {
   }).join('');
 }
 
-// Add patient
-function addPatient(name, age, gender, severity, symptoms) {
-  const priority = calculatePriority(age, severity);
-  queue.push({
-    id: nextId++,
-    name, age, gender, severity, symptoms, priority,
-    status: 'waiting',
-    arrivedAt: new Date().toISOString()
-  });
-  saveQueue();
+// Add patient via API
+async function addPatient(name, age, gender, severity, symptoms) {
+  await apiPost('/api/patients', { name, age, gender, severity, symptoms });
+  await loadQueue();
 }
 
-// Serve patient
-window.servePatient = function(id) {
-  const p = queue.find(x => x.id === id);
-  if (p) { p.status = 'serving'; saveQueue(); renderQueue(); }
+// Serve patient (admin only)
+window.servePatient = async function(id) {
+  if (!isAdmin) return;
+  await apiPatch(`/api/patients/${id}/serve`);
+  await loadQueue();
+  renderQueue();
 };
 
-// Complete patient
-window.completePatient = function(id) {
-  const p = queue.find(x => x.id === id);
-  if (p) { p.status = 'done'; saveQueue(); renderQueue(); }
+// Complete patient (admin only)
+window.completePatient = async function(id) {
+  if (!isAdmin) return;
+  await apiPatch(`/api/patients/${id}/complete`);
+  await loadQueue();
+  renderQueue();
 };
 
 // ===== Mobile Nav Toggle =====
-document.querySelector('.nav-toggle').addEventListener('click', function() {
-  document.querySelector('.navbar').classList.toggle('open');
-});
+const navToggle = document.querySelector('.nav-toggle');
+if (navToggle) {
+  navToggle.addEventListener('click', function() {
+    document.querySelector('.navbar').classList.toggle('open');
+  });
+}
 
 document.querySelectorAll('.nav-links a').forEach(link => {
   link.addEventListener('click', () => {
-    document.querySelector('.navbar').classList.remove('open');
+    const navbar = document.querySelector('.navbar');
+    if (navbar) navbar.classList.remove('open');
   });
 });
 
 // ===== Navbar scroll effect =====
 window.addEventListener('scroll', () => {
-  document.querySelector('.navbar').classList.toggle('scrolled', window.scrollY > 20);
+  const navbar = document.querySelector('.navbar');
+  if (navbar) navbar.classList.toggle('scrolled', window.scrollY > 20);
 });
 
 // ===== Scroll-triggered fade-up animations =====
